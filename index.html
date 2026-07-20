@@ -1,122 +1,253 @@
-<!DOCTYPE html>
-
+<!doctype html>
 <html>
-<head>
-  <meta charset="utf-8">
+  <head>
+    <title>CSSO – CSS optimizer</title>
+    <link rel="stylesheet" href="csso.css" type="text/css">
+    <script src="csso.js"></script>
+    <script src="libs/cssbeautify.js"></script>
+    <script src="libs/base64.js"></script>
+    <script src="libs/diff.js"></script>
+    <script src="libs/fflate.js"></script>
+  </head>
+  <body>
+    <section>
+        <div class="header">
+            <span class="caption">Original CSS</span>
+            <button id="beautifySource">Beautify</button>
+        </div>
+        <textarea id="source" class="editor">.foo { color: #ff0000; }
+.bar { color: rgba(255, 0, 0, 1); }</textarea>
+    </section>
+    <section id="result">
+        <div class="header">
+            <span class="caption">Minified CSS</span>
+            <label for="sourceMap">
+                <input type="checkbox" id="sourceMap"> Source map
+            </label>
+            <label for="restructure">
+                <input type="checkbox" id="restructure" checked> Restructure
+            </label>
+            <label for="beautify">
+                <input type="checkbox" id="beautify"> Beautify
+            </label>
+        </div>
+        <div id="output"><div class="content"></div></div>
+        <div class="change-log-toggle">Show transformations log</div>
+        <div id="transformations-log"><div class="content"></div></div>
+        <div class="stat-block">
+            <div id="stat"></div>
+            <div class="powered">
+                Powered by <a href="https://github.com/css/csso">CSSO</a> <span id="version"></span>
+            </div>
+        </div>
+        <div id="error">
+            <div class="header">
+                <span class="caption">Error</span>
+            </div>
+            <div id="errorMessage"></div>
+        </div>
+    </section>
 
-  <title>csso – CSS optimizer</title>
+    <script>
+        var lastSource;
+        var lastResult;
+        var lastResultMap;
 
-  <style>
-    body {
-      margin-top: 1.0em;
-      background-color: #fff;
-      font-family: Helvetica, Arial, FreeSans, san-serif;
-      color: #000000;
-    }
-    
-    #container {
-      margin: 0 auto;
-      width: 700px;
-    }
-    
-    h1 {
-      font-size: 3.8em;
-      color: #000000;
-      margin-bottom: 3px;
-    }
-    
-    h1 .small {
-      font-size: 0.4em;
-    }
-    
-    h1 a {
-      text-decoration: none
-    }
-    
-    h2 {
-      margin-top: 2em;
-      font-size: 1.5em;
-      color: #000000;
-    }
+        function beautifySourceCSS() {
+            source.value = cssbeautify(source.value);
+        }
 
-    a {
-      color: #000000;
-    }
-    
-    .description {
-      font-size: 1.2em;
-      margin-bottom: 30px;
-      margin-top: 30px;
-      font-style: italic;
-    }
-    
-    .download {
-      float: right;
-    }
-    
-    pre {
-      background: #000;
-      color: #fff;
-      padding: 15px;
-    }
-    
-    .tryit {
-      font-size: 150%;
-      text-align: center;
-    }
-  </style>
-</head>
+        function processParseError(source, details, message) {
+            function formatLines(start, end) {
+                return lines.slice(start, end).map(function(line, idx) {
+                    var num = String(start + idx + 1);
 
-<body>
-  <a href="https://github.com/css/csso"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://s3.amazonaws.com/github/ribbons/forkme_right_darkblue_121621.png" alt="Fork me on GitHub" /></a>
+                    while (num.length < maxNumLength) {
+                        num = ' ' + num;
+                    }
 
-  <div id="container">
+                    return num + ' |' + line;
+                }).join('\n');
+            }
 
-    <div class="download">
-      <a href="https://github.com/css/csso/zipball/master">
-        <img border="0" width="90" src="https://github.com/images/modules/download/zip.png"></a>
-      <a href="https://github.com/css/csso/tarball/master">
-        <img border="0" width="90" src="https://github.com/images/modules/download/tar.png"></a>
-    </div>
+            var lines = source.split(/\n|\r\n?|\f/);
+            var column = details.column;
+            var line = details.line;
+            var startLine = Math.max(1, line - 3);
+            var endLine = Math.min(line + 3, lines.length + 1);
+            var maxNumLength = Math.max(4, String(endLine).length) + 1;
 
-    <h1>
-      <a href="https://github.com/css/csso">csso</a>
-      <span class="small">by <a href="https://github.com/css">css</a></span>
-    </h1>
+            return [
+                'CSS parse error: ' + message + '\n',
+                formatLines(startLine - 1, line),
+                new Array(column + maxNumLength + 2).join('-') + '^',
+                formatLines(line, endLine)
+            ].join('\n');
+        }
 
-    <div class="description">
-      CSSO (CSS Optimizer) is a CSS minifier. It performs three sort of transformations: cleaning (removing redundant), compression (replacement for shorter form) and restructuring (merge of declarations, rulesets and so on).
-    </div>
+        function updateStat(originalSize, resultSize, time) {
+            function percent(value) {
+                return value ? ' (' + (100 * value).toFixed(2) + '%)' : '';
+            }
 
-    <p>
-      <a href="https://www.npmjs.com/package/csso"><img src="https://img.shields.io/npm/v/csso.svg" height="20"></a>
-      <a href="https://www.npmjs.com/package/csso"><img src="https://img.shields.io/npm/dm/csso.svg" height="20"></a>
-    </p>
+            var delta = originalSize - resultSize;
 
-    <p>
-      <pre>npm install csso</pre>
-    </p>
+            stat.innerHTML =
+                'Original:   ' + originalSize + ' bytes\n' +
+                'Compressed: ' + resultSize + ' bytes' + percent(resultSize / originalSize) + '\n' +
+                'Saving:     ' + delta + ' bytes' + percent(delta / originalSize) + '\n' +
+                'Time:       ' + time + ' ms';
+        }
 
-    <p class="tryit">
-      <a href="./csso.html">Try it out</a>
-    </p>
+        function setOutput() {
+            var css = lastResult;
 
-    <h2>Maintainers</h2>
-    <p>
-      <a href="https://github.com/lahmatiy">Roman Dvornov</a>
-    </p>
+            if (sourceMap.checked && lastResultMap) {
+                css += '\n/*# sourceMappingURL=application/json;base64,' + Base64.encode(lastResultMap) + ' */';
+            } else if (beautify.checked) {
+                css = cssbeautify(css);
+            }
 
-    <h2>Authors</h2>
-    <p>
-      Initial idea — Vitaly Harisov (vitaly@harisov.name)<br/>
-      Implementation — Sergey Kryzhanovsky (skryzhanovsky@ya.ru)<br/>
-      English translation — Leonid Khachaturov (leonidkhachaturov@gmail.com)
-    </p>
 
-    <h2>License</h2>
-    <p>MIT</p>
+            document.querySelector('#output .content').textContent = css;
+        }
 
-  </div>
+        function outputChanges(steps) {
+            var lastStep = '';
+            var transformations = '';
 
-</body>
+            if (result.classList.contains('show-transformations')) {
+                steps.forEach(function(item) {
+                    if (item.css !== lastStep && lastStep) {
+                        // transformations += '<span class="delta empty-delta">(no transformations)</span><br/>';
+                        transformations += '<h2>' + item.name + '</h2>';
+                        transformations +=
+                            '<div class="delta">' +
+                            JsDiff.diffCss(lastStep, item.css).map(function(chunk) {
+                                if (chunk.removed) {
+                                    return '<span class="removed">' + chunk.value + '</span>';
+                                } else if (chunk.added) {
+                                    return '<span class="added">' + chunk.value + '</span>';
+                                } else {
+                                    return chunk.value;
+                                }
+                            }).join('') +
+                            '</div>';
+                    }
+
+                    lastStep = item.css;
+                });
+            }
+
+            document.querySelector('#transformations-log .content').innerHTML =
+                transformations +
+                '<h2>result</h2><div class="delta">' +
+                lastStep +
+                '</div>';
+        }
+
+        function urlEncode(data) {
+            var buffer = window.fflate.strToU8(data);
+            var zipped = window.fflate.zlibSync(buffer, { level: 9 });
+            var binary = window.fflate.strFromU8(zipped, true);
+            return btoa(binary);
+        }
+        function urlDecode(base64) {
+            var binary = atob(base64);
+            if (binary.startsWith('\x78\xDA')) {
+                var buffer = window.fflate.strToU8(binary, true);
+                var unzipped = window.fflate.unzlibSync(buffer);
+                return window.fflate.strFromU8(unzipped);
+            }
+            return decodeURIComponent(escape(binary));
+        }
+        function setUrlParams(input) {
+            var value = '';
+            if (input) {
+                value = urlEncode(input);
+            }
+            var url = new URL(window.location);
+            url.searchParams.set('v', value);
+            history.replaceState({}, '', url);
+        }
+        function loadUrlParams() {
+            var url = new URL(window.location);
+            var value = url.searchParams.get('v')
+            if (value) {
+                source.value = urlDecode(value);
+            }
+        }
+
+        function process(force) {
+            var time;
+
+            if (force !== true && source.value === lastSource) {
+                return;
+            }
+
+            beautify.disabled = sourceMap.checked;
+
+            var time = (window.performance || Date).now();
+            var steps = [];
+
+            try {
+                lastSource = source.value;
+                setUrlParams(lastSource);
+
+                lastResult = csso.minify(source.value, {
+                    restructure: restructure.checked,
+                    sourceMap: sourceMap.checked,
+                    logger: function(name, ast) {
+                        if (ast) {
+                            steps.push({
+                                name: name,
+                                css: csso.syntax.generate(ast)
+                            });
+                        }
+                    }
+                });
+
+                lastResultMap = lastResult.map ? lastResult.map.toString() : null;
+                lastResult = lastResult.css;
+
+                error.classList.remove('show');
+            } catch(e) {
+                errorMessage.textContent = e.parseError
+                    ? processParseError(source.value, e.parseError, e.message)
+                    : e.message;
+                error.classList.add('show');
+                return;
+            }
+
+            updateStat(
+                lastSource.length,
+                lastResult.length,
+                Math.round((window.performance || Date).now() - time)
+            );
+
+            setOutput();
+            outputChanges(steps);
+        }
+
+        source.addEventListener('input', process, false);
+        source.addEventListener('keyup', process, false);
+        beautifySource.addEventListener('click', beautifySourceCSS, false);
+        beautify.addEventListener('change', setOutput, false);
+        restructure.addEventListener('change', process.bind(null, true), false);
+        sourceMap.addEventListener('change', process.bind(null, true), false);
+        document.querySelector('.change-log-toggle').addEventListener('click', function({ target }) {
+            var show = result.classList.toggle('show-transformations');
+            if (show) {
+                target.textContent = 'Hide transformations log';
+                process(true);
+            } else {
+                target.textContent = 'Show transformations log';
+            }
+        }, false);
+
+        document.getElementById('version').innerHTML = csso.version;
+        loadUrlParams();
+        process();
+    </script>
+  </body>
 </html>
