@@ -10,6 +10,7 @@
     <script src="libs/cssbeautify.js"></script>
     <script src="libs/base64.js"></script>
     <script src="libs/diff.js"></script>
+    <script src="libs/fflate.js"></script>
 
     <section>
         <div class="header">
@@ -147,6 +148,38 @@
                 '</div>';
         }
 
+        function urlEncode(data) {
+            const buffer = window.fflate.strToU8(data);
+            const zipped = window.fflate.zlibSync(buffer, { level: 9 });
+            const binary = window.fflate.strFromU8(zipped, true);
+            return btoa(binary);
+        }
+        function urlDecode(base64) {
+            const binary = atob(base64);
+            if (binary.startsWith('\x78\xDA')) {
+                const buffer = window.fflate.strToU8(binary, true);
+                const unzipped = window.fflate.unzlibSync(buffer);
+                return window.fflate.strFromU8(unzipped);
+            }
+            return decodeURIComponent(escape(binary));
+        }
+        function setUrlParams(input) {
+            let value = '';
+            if (input) {
+                value = urlEncode(input);
+            }
+            const url = new URL(window.location);
+            url.searchParams.set('v', value);
+            history.replaceState({}, '', url);
+        }
+        function loadUrlParams() {
+            const url = new URL(window.location);
+            const value = url.searchParams.get('v')
+            if (value) {
+                source.value = urlDecode(value);
+            }
+        }
+
         function process(force) {
             var time;
 
@@ -161,6 +194,8 @@
 
             try {
                 lastSource = source.value;
+                setUrlParams(lastSource);
+
                 lastResult = csso.minify(source.value, {
                     restructure: restructure.checked,
                     sourceMap: sourceMap.checked,
@@ -213,6 +248,7 @@
         }, false);
 
         document.getElementById('version').innerHTML = csso.version;
+        loadUrlParams();
         process();
     </script>
 
