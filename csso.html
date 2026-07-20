@@ -149,32 +149,32 @@
         }
 
         function urlEncode(data) {
-            const buffer = window.fflate.strToU8(data);
-            const zipped = window.fflate.zlibSync(buffer, { level: 9 });
-            const binary = window.fflate.strFromU8(zipped, true);
+            var buffer = window.fflate.strToU8(data);
+            var zipped = window.fflate.zlibSync(buffer, { level: 9 });
+            var binary = window.fflate.strFromU8(zipped, true);
             return btoa(binary);
         }
         function urlDecode(base64) {
-            const binary = atob(base64);
+            var binary = atob(base64);
             if (binary.startsWith('\x78\xDA')) {
-                const buffer = window.fflate.strToU8(binary, true);
-                const unzipped = window.fflate.unzlibSync(buffer);
+                var buffer = window.fflate.strToU8(binary, true);
+                var unzipped = window.fflate.unzlibSync(buffer);
                 return window.fflate.strFromU8(unzipped);
             }
             return decodeURIComponent(escape(binary));
         }
         function setUrlParams(input) {
-            let value = '';
+            var value = '';
             if (input) {
                 value = urlEncode(input);
             }
-            const url = new URL(window.location);
+            var url = new URL(window.location);
             url.searchParams.set('v', value);
             history.replaceState({}, '', url);
         }
         function loadUrlParams() {
-            const url = new URL(window.location);
-            const value = url.searchParams.get('v')
+            var url = new URL(window.location);
+            var value = url.searchParams.get('v')
             if (value) {
                 source.value = urlDecode(value);
             }
